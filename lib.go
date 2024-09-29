@@ -1,7 +1,6 @@
 package pbatch
 
 import (
-	"errors"
 	"strings"
 	"sync"
 )
@@ -12,6 +11,45 @@ const (
 	STOP_ON_ERROR     errorHandler = true
 	CONTINUE_ON_ERROR errorHandler = false
 )
+
+// BatchError is a custom error type that aggregates multiple errors
+type BatchError struct {
+	Errors []error
+}
+
+func (e BatchError) Error() string {
+	var errStrings []string
+	for _, err := range e.Errors {
+		errStrings = append(errStrings, err.Error())
+	}
+	return "batch error: " + strings.Join(errStrings, "; ")
+}
+
+// IsBatchError checks if an error is a BatchError
+func IsBatchError(err error) bool {
+	_, ok := err.(BatchError)
+	return ok
+}
+
+// UnwrapBatchError unwraps a BatchError and returns the list of errors
+//
+// Parameters:
+//   - err: the error to unwrap
+//
+// Returns:
+//   - a slice of errors if the error is a BatchError, or a slice containing the error itself
+func UnwrapBatchError(err error) []error {
+	if err == nil {
+		return nil
+	}
+
+	batchErr, ok := err.(BatchError)
+	if !ok {
+		return []error{err}
+	}
+
+	return batchErr.Errors
+}
 
 // Run runs the process function on each item in the items slice in parallel.
 // Only batchSize items are processed at a time.
@@ -129,9 +167,9 @@ func Process[T any](items []T, batchSize int, process func(T) error) error {
 
 // aggregateErrors combines multiple errors into a single error
 func aggregateErrors(errs []error) error {
-	var errStrings []string
-	for _, err := range errs {
-		errStrings = append(errStrings, err.Error())
+	if len(errs) == 0 {
+		return nil
 	}
-	return errors.New("multiple errors: " + strings.Join(errStrings, "; "))
+
+	return BatchError{Errors: errs}
 }

@@ -297,3 +297,58 @@ func TestRun_ContinueOnErrors_AllSuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchErrorAggregation(t *testing.T) {
+	items := []int{1, 2, 3, 4, 5}
+	batchSize := 2
+
+	// Define a process function that will fail for odd numbers
+	process := func(n int) (string, error) {
+		if n%2 != 0 {
+			return "", fmt.Errorf("error processing item %d", n)
+		}
+		return fmt.Sprintf("Processed: %d", n), nil
+	}
+
+	// Use CONTINUE_ON_ERROR to aggregate all errors
+	_, err := pbatch.Run(items, batchSize, pbatch.CONTINUE_ON_ERROR, process)
+
+	// Ensure that an error was returned
+	if err == nil {
+		t.Fatal("expected a BatchError, got nil")
+	}
+
+	// Check if the error is a BatchError
+	if !pbatch.IsBatchError(err) {
+		t.Fatalf("expected error to be a BatchError, got %T", err)
+	}
+
+	// Unwrap the BatchError to access individual errors
+	errors := pbatch.UnwrapBatchError(err)
+
+	// Expected errors for all odd items
+	expectedErrors := []string{
+		"error processing item 1",
+		"error processing item 3",
+		"error processing item 5",
+	}
+
+	// Ensure that the length of unwrapped errors matches expected errors
+	if len(errors) != len(expectedErrors) {
+		t.Fatalf("expected %d errors, got %d", len(expectedErrors), len(errors))
+	}
+
+	// Validate each individual error. Order is not guaranteed, so we check each error against all expected errors
+	for i, individualErr := range errors {
+		found := false
+		for _, expected := range expectedErrors {
+			if individualErr.Error() == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("unexpected error %q at index %d", individualErr.Error(), i)
+		}
+	}
+}

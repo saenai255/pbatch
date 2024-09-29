@@ -1,12 +1,13 @@
 # pbatch
 
-`pbatch` is a lightweight Go package for processing a slice of items concurrently with control over error handling. You can control how many items are processed at a time (`batchSize`) and decide whether to stop processing upon encountering an error or continue processing all items while aggregating errors.
+`pbatch` is a lightweight Go package for processing a slice of items concurrently, with control over error handling. You can control how many items are processed at a time (`batchSize`) and decide whether to stop processing upon encountering an error or continue processing all items while aggregating errors.
 
 ## Features
 
-- **Concurrent Batch Processing**: Processes items concurrently with a configurable batch size.
-- **Customizable Error Handling**: Option to stop on the first error (`STOP_ON_ERROR`) or continue processing all items and aggregate all errors (`CONTINUE_ON_ERROR`).
+- **Concurrent Batch Processing**: Process items concurrently with a configurable batch size.
+- **Customizable Error Handling**: Option to stop on the first error (`STOP_ON_ERROR`) or continue processing all items and aggregate errors (`CONTINUE_ON_ERROR`).
 - **Flexible Processing Functions**: Supports functions that return results or simply perform actions on items.
+- **Batch Error Aggregation**: When using `CONTINUE_ON_ERROR`, errors are aggregated into a custom `BatchError` type.
 
 ## Installation
 
@@ -44,11 +45,11 @@ func Run[T any, R any](items []T, batchSize int, handleErrorStrategy errorHandle
 #### Returns
 
 - **`[]R`**: A slice of results from the `process` function.
-- **`error`**: An error if any occur and `STOP_ON_ERROR` is set, or an aggregated error if `CONTINUE_ON_ERROR` is set.
+- **`error`**: 
+  - If `handleErrorStrategy` is `STOP_ON_ERROR`, an error is returned when any error occurs, stopping further processing.
+  - If `handleErrorStrategy` is `CONTINUE_ON_ERROR`, a `BatchError` containing all errors is returned.
 
 ### Example: Using `Run`
-
-Here is an example showing how to use `Run` to process items concurrently:
 
 ```go
 package main
@@ -81,7 +82,12 @@ func main() {
 	// Run with CONTINUE_ON_ERROR
 	results, err = pbatch.Run(items, batchSize, pbatch.CONTINUE_ON_ERROR, processFunc)
 	if err != nil {
-		fmt.Println("Aggregated Errors:", err)
+		fmt.Println("BatchError:", err)
+		if pbatch.IsBatchError(err) {
+			for _, individualErr := range pbatch.UnwrapBatchError(err) {
+				fmt.Println(" -", individualErr)
+			}
+		}
 	}
 	fmt.Println("Results:", results)
 }
@@ -93,18 +99,19 @@ func main() {
 Error: error processing item 3
 Results: []
 
-Aggregated Errors: multiple errors: error processing item 3
+BatchError: batch error: error processing item 3
+ - error processing item 3
 Results: [1 4 0 16 25]
 ```
 
 ### Error Handling Strategies
 
 - **`STOP_ON_ERROR`**: Processing stops as soon as an error is encountered, and that error is returned.
-- **`CONTINUE_ON_ERROR`**: Processing continues for all items, and any errors are aggregated and returned as a single error.
+- **`CONTINUE_ON_ERROR`**: Processing continues for all items, and any errors encountered are aggregated into a `BatchError`.
 
 ### `Process` Function
 
-The `Process` function is a wrapper around `Run` for cases where you don't need the results and only care about processing items:
+The `Process` function is a wrapper around `Run` for cases where you don't need the results and only care about processing items.
 
 #### Signature
 
@@ -120,7 +127,9 @@ func Process[T any](items []T, batchSize int, process func(T) error) error
 
 #### Returns
 
-- **`error`**: An error if any occur during processing.
+- **`error`**: 
+  - An error if any occur and `handleErrorStrategy` is `STOP_ON_ERROR`.
+  - A `BatchError` containing all errors if `handleErrorStrategy` is `CONTINUE_ON_ERROR`.
 
 #### Example: Using `Process`
 
@@ -153,16 +162,30 @@ func main() {
 }
 ```
 
-### `errorHandler` Constants
+### `BatchError` Type
 
-The `errorHandler` type is used to define how errors should be handled during processing. Two constants are provided:
+`pbatch` introduces a `BatchError` type to handle scenarios where multiple errors occur during processing. This allows all errors to be captured and returned as a single entity.
 
-- **`pbatch.STOP_ON_ERROR`**: Stops processing on the first encountered error.
-- **`pbatch.CONTINUE_ON_ERROR`**: Continues processing all items and aggregates errors.
+#### `BatchError` Functions
+- **`Error() string`**: Returns a concatenated string representation of all contained errors.
+- **`IsBatchError(error)`**: Checks if an error is a `BatchError`.
+- **`UnwrapBatchError(error)`**: Extracts all errors from a `BatchError`. If the error is not a `BatchError`, it returns the error in a slice.
+
+#### Example: Working with `BatchError`
+
+```go
+err := pbatch.Run(items, batchSize, pbatch.CONTINUE_ON_ERROR, processFunc)
+if err != nil && pbatch.IsBatchError(err) {
+    errors := pbatch.UnwrapBatchError(err)
+    for _, e := range errors {
+        fmt.Println("Individual error:", e)
+    }
+}
+```
 
 ### Error Aggregation
 
-When using `CONTINUE_ON_ERROR`, any errors encountered are combined into a single error message. This aggregated error will contain all individual error messages concatenated.
+When using `CONTINUE_ON_ERROR`, any errors encountered are combined into a `BatchError`. This aggregated error contains all individual errors as a slice, allowing for easy inspection and handling.
 
 ### License
 
@@ -170,4 +193,4 @@ This library is licensed under the MIT License.
 
 ---
 
-With `pbatch`, you can easily process slices of items concurrently while having full control over the batch size and error-handling strategy. Use it to make your batch processing efficient and flexible in your Go applications.
+With `pbatch`, you can easily process slices of items concurrently, with control over the batch size and error-handling strategy. Use `STOP_ON_ERROR` for immediate error stops, or `CONTINUE_ON_ERROR` to aggregate errors and continue processing seamlessly.
